@@ -69,6 +69,9 @@ Vagrant.configure(2) do |config|
         vb.cpus = if params[:cpus] then params[:cpus].to_i else 1 end
         vb.memory = 1024 * params[:memory].to_i
         vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+        # super magic - change default NAT network ip
+        vb.customize ['modifyvm', :id, '--natnet1', '192.168.222.0/24']
+
         vb.name = "#{deploy_prefix}-#{params[:name]}"
 
         override.vm.hostname = "#{deploy_prefix}-#{params[:name]}"
