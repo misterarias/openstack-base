@@ -1,0 +1,121 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure(2) do |config|
+
+  deploy_prefix = 'openstack'
+  machines = [
+    {
+      :name => "controller",
+      :networks => [
+        { :ip=>"10.0.0.11", :gw => "10.0.0.1", :mask => "10.0.0.0/24" }
+      ],
+      :memory => 2, :cpus => 2 ,
+      :ports => [
+        { :host  => 10080, :guest => 80 }
+      ],
+      :ntp => {
+        :master => true,
+        :sync_server => 'time.nist.gov'
+      }
+    },
+    {
+      :name => "compute-1",
+      :networks => [
+        { :ip=>"10.0.0.31", :gw => "10.0.0.1", :mask => "10.0.0.0/24" }
+      ],
+      :memory => 2,
+      :ntp => {
+        :sync_server => :controller
+      }
+    },
+    {
+      :name => "compute-2",
+      :networks => [
+        { :ip=>"10.0.0.32", :gw => "10.0.0.1" , :mask => "10.0.0.0/24"}
+      ],
+      :memory => 2,
+      :ntp => {
+        :sync_server => :controller
+      }
+    },
+    {
+      :name => "network",
+      :networks => [
+        { :ip => "10.0.0.21", :gw => "10.0.0.1" , :mask => "10.0.0.0/24"},
+        { :ip => "10.0.1.21" },
+        { :ip => :none, :name => "eth3" }
+      ],
+      :memory => 2,
+      :ntp => {
+        :sync_server => :controller
+      }
+    }
+  ]
+
+  machines.each do |params|
+
+    config.vm.define params[:name] do |host|
+
+      host.vm.box = "centos/7"
+      host.vm.synced_folder ".", "/vagrant", disabled:true
+
+      config.hostmanager.enabled = true
+      config.hostmanager.manage_host = false
+      config.hostmanager.manage_guest = true
+      config.hostmanager.ignore_private_ip = false
+
+      host.vm.provider :virtualbox do |vb, override|
+        vb.cpus = if params[:cpus] then params[:cpus].to_i else 1 end
+        vb.memory = 1024 * params[:memory].to_i
+        vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+        vb.name = "#{deploy_prefix}-#{params[:name]}"
+
+        override.vm.hostname = "#{deploy_prefix}-#{params[:name]}"
+        params[:networks].each do |info|
+
+          # If there is a defined IP, create a private network
+          if info[:ip] != :none then
+            override.vm.network "private_network", ip: info[:ip]
+          else
+            # If we choose not to set an IP, but we define a named interface, create it
+            if info[:name] then
+              override.vm.provision "shell",
+                run: "always",
+                inline: "echo '
+              DEVICE=#{info[:name]}
+              TYPE=Ethernet
+              ONBOOT=\"yes\"
+              BOOTPROTO=\"none\"' > /etc/sysconfig/network-scripts/ifcfg-#{info[:name]}"
+            end
+          end
+
+          # If a gw is set, add it as default
+          if info[:gw] then
+            override.vm.provision "shell",
+              run: "always",
+              inline: "ip route add #{info[:mask]} via #{info[:gw]}"
+          end
+        end
+
+        params[:ports].each do |p|
+          override.vm.network "forwarded_port", guest: p[:guest].to_i, host: p[:host].to_i
+        end if params[:ports]
+      end
+
+      host.vm.provision "file", source: "./bootstrap.sh", destination: "/tmp/bootstrap.sh"
+      if params[:ntp][:master] then
+        host.vm.provision "shell", privileged: true, inline: "bash /tmp/bootstrap.sh 1 #{params[:ntp][:sync_server]}"
+      else
+        host.vm.provision "shell", privileged: true, inline: "bash /tmp/bootstrap.sh 0 #{params[:ntp][:sync_server]}"
+      end
+    end
+  end
+
+  # specific stuff
+  config.vm.define "controller" do |controller|
+    controller.vm.provision "file", source: "./controller/bootstrap.sh", destination: "/tmp/start.sh"
+    controller.vm.provision "shell", privileged: true, inline: "bash /tmp/start.sh"
+
+  end
+end
