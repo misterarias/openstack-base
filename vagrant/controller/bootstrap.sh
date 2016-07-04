@@ -1,7 +1,7 @@
 #!/bin/bash
 yum install -y mariadb mariadb-server MySQL-python rabbitmq-server
 
-cat > /Etc/my.cnf.d/mariadb_openstack.cnf << _EOF_
+cat > /etc/my.cnf.d/mariadb_openstack.cnf << _EOF_
 
 [mysqld]
 bind-address = 10.0.0.11
